@@ -16,6 +16,7 @@ permissions:
 
 env:
   TF_VERSION: "1.7.5"
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 jobs:
   # ── Layer 1: networking + security ─────────────────────────────────────────
