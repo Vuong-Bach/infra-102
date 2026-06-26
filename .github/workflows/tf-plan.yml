@@ -30,6 +30,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.TF_PLAN_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION || inputs.aws_region }}
+          audience: sts.amazonaws.com
 
       - uses: hashicorp/setup-terraform@v4
         with:
@@ -70,6 +71,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.TF_PLAN_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION || inputs.aws_region }}
+          audience: sts.amazonaws.com
 
       - uses: hashicorp/setup-terraform@v4
         with:
