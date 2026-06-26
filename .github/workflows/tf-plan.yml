@@ -8,7 +8,7 @@ on:
       aws_region:
         description: 'AWS region'
         required: false
-        default: 'us-east-1'
+        default: 'ap-southeast-1'
 
 permissions:
   id-token: write   # required for OIDC token
@@ -26,12 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: debug oidc token claims
-        run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
-          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{aud,sub,iss}'
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
