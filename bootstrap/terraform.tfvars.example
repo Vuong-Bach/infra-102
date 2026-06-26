@@ -1,0 +1,4 @@
+aws_region  = "us-east-1"
+name_prefix = "infra102"
+environment = "sandbox"
+github_repo = "Vuong-Bach/infra-102"
