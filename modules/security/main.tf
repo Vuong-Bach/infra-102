@@ -34,7 +34,7 @@ resource "aws_security_group_rule" "nodes_from_control_plane" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.eks_nodes.id
   source_security_group_id = aws_security_group.eks_control_plane.id
-  description              = "Control plane → kubelet/NodePort"
+  description              = "Control plane to kubelet/NodePort"
 }
 
 # Nodes: allow all outbound (NAT GW handles egress to internet/ECR)
@@ -56,7 +56,7 @@ resource "aws_security_group_rule" "control_plane_from_nodes" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.eks_control_plane.id
   source_security_group_id = aws_security_group.eks_nodes.id
-  description              = "Nodes → API server"
+  description              = "Nodes to API server"
 }
 
 # Control plane: outbound to kubelet
@@ -67,7 +67,7 @@ resource "aws_security_group_rule" "control_plane_to_nodes" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.eks_control_plane.id
   source_security_group_id = aws_security_group.eks_nodes.id
-  description              = "API server → kubelet"
+  description              = "API server to kubelet"
 }
 
 # ── KMS Key for EKS secrets encryption ───────────────────────────────────────

@@ -108,7 +108,7 @@ resource "aws_iam_role" "plan" {
 }
 
 resource "aws_iam_role_policy" "plan" {
-  name = "tf-plan"
+  name = "tf-plan-state"
   role = aws_iam_role.plan.id
   policy = jsonencode({
     Version = "2012-10-17"
@@ -131,19 +131,13 @@ resource "aws_iam_role_policy" "plan" {
         Action   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
         Resource = aws_kms_key.state.arn
       },
-      {
-        Sid    = "ReadOnly"
-        Effect = "Allow"
-        Action = [
-          "ec2:Describe*",
-          "eks:Describe*", "eks:List*",
-          "iam:Get*", "iam:List*",
-          "kms:Describe*", "kms:List*",
-        ]
-        Resource = "*"
-      },
     ]
   })
+}
+
+resource "aws_iam_role_policy_attachment" "plan_readonly" {
+  role       = aws_iam_role.plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
 # ── IAM Role: Apply — main branch only ───────────────────────────────────────

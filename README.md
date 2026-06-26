@@ -46,6 +46,132 @@ Each environment layer has its own Terraform state file, its own `terraform init
 - Terraform >= 1.7
 - Git
 
+### Step 1 — Create IAM roles (choose one option)
+
+#### Option A — Bootstrap (automated, recommended)
+
+Bootstrap creates the S3 state bucket, DynamoDB lock table, GitHub OIDC provider, and two IAM roles automatically — skip to Step 2 after this.
+
+#### Option B — AWS Console (manual)
+
+**1. Add the GitHub OIDC provider** (skip if it already exists in your account)
+
+IAM → Identity providers → Add provider:
+- Provider type: `OpenID Connect`
+- Provider URL: `https://token.actions.githubusercontent.com`
+- Audience: `sts.amazonaws.com`
+
+**2. Create the Plan policy**
+
+IAM → Policies → Create policy → JSON tab, paste the following (replace placeholder values with your actual bucket/table/KMS key):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateRead",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:ListBucket", "s3:GetBucketVersioning", "s3:GetEncryptionConfiguration"],
+      "Resource": [
+        "arn:aws:s3:::<your-state-bucket>",
+        "arn:aws:s3:::<your-state-bucket>/*"
+      ]
+    },
+    {
+      "Sid": "LockRW",
+      "Effect": "Allow",
+      "Action": ["dynamodb:DescribeTable", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"],
+      "Resource": "arn:aws:dynamodb:<region>:<account_id>:table/<your-lock-table>"
+    },
+    {
+      "Sid": "KMSRead",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"],
+      "Resource": "arn:aws:kms:<region>:<account_id>:key/<your-kms-key-id>"
+    },
+    {
+      "Sid": "ReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "eks:Describe*",
+        "eks:List*",
+        "iam:Get*",
+        "iam:List*",
+        "kms:Describe*",
+        "kms:List*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Name the policy: `infra102-sandbox-ci-plan-policy`
+
+**3. Create the Plan role**
+
+IAM → Roles → Create role → Custom trust policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Federated": "arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com"
+    },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringLike": {
+        "token.actions.githubusercontent.com:sub": "repo:Vuong-Bach/infra-102:*"
+      },
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+      }
+    }
+  }]
+}
+```
+
+Add permissions: search and attach `infra102-sandbox-ci-plan-policy`.
+
+Name the role: `infra102-sandbox-ci-plan`
+
+**4. Create the Apply role** (main branch only)
+
+IAM → Roles → Create role → Custom trust policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Federated": "arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com"
+    },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "token.actions.githubusercontent.com:sub": "repo:Vuong-Bach/infra-102:ref:refs/heads/main",
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+      }
+    }
+  }]
+}
+```
+
+Add permissions: search and attach `AdministratorAccess`.
+
+> Note: `AdministratorAccess` is acceptable for a sandbox environment. Scope this down before using in staging/production.
+
+Name the role: `infra102-sandbox-ci-apply`
+
+**5. Copy the role ARNs** from each role's summary page — you will need them in Step 2.
+
+---
+
 ### Step 1 — Bootstrap (run once locally)
 
 Bootstrap creates the S3 state bucket, DynamoDB lock table, GitHub OIDC provider, and two IAM roles (plan / apply).
@@ -139,6 +265,16 @@ kubectl get nodes
 ```
 
 ---
+
+## Local checks
+
+Run these checks locally before pushing a change:
+
+```bash
+make check
+```
+
+This runs only Terraform formatting and validation for the sandbox environments.
 
 ## CI/CD flow
 
