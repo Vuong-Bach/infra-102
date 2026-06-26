@@ -73,7 +73,10 @@ resource "aws_dynamodb_table" "state_lock" {
   name         = "${var.name_prefix}-${var.environment}-tfstate-lock"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
-  attribute { name = "LockID"; type = "S" }
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
   server_side_encryption {
     enabled     = true
     kms_key_arn = aws_kms_key.state.arn
@@ -153,7 +156,7 @@ resource "aws_iam_role" "apply" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:environment:sandbox"
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
       }

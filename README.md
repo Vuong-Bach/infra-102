@@ -29,9 +29,13 @@ infra-102/
 │   └── sandbox/
 │       ├── 1-networking/         # Layer 1 — calls networking + security modules
 │       └── 2-cluster/            # Layer 2 — calls eks module, reads Layer 1 state
+├── scripts/
+│   ├── local-check.sh            # Run fmt + validate locally before pushing
+│   └── set-github-secrets.sh     # Set GitHub Actions secrets from bootstrap outputs
 └── .github/workflows/
     ├── tf-plan.yml               # Runs on every PR → terraform plan
-    └── tf-apply.yml              # Runs on merge to main → terraform apply
+    ├── tf-apply.yml              # Runs on merge to main → terraform apply
+    └── tf-destroy.yml            # Manual only → terraform destroy (reverse order)
 ```
 
 Each environment layer has its own Terraform state file, its own `terraform init`, and no `-target` hacks.
@@ -44,180 +48,62 @@ Each environment layer has its own Terraform state file, its own `terraform init
 
 - AWS CLI configured (`aws configure`) with admin credentials
 - Terraform >= 1.7
+- GitHub CLI (`gh`) authenticated — `gh auth login`
 - Git
 
-### Step 1 — Create IAM roles (choose one option)
+### Step 1 — Bootstrap
 
-#### Option A — Bootstrap (automated, recommended)
-
-Bootstrap creates the S3 state bucket, DynamoDB lock table, GitHub OIDC provider, and two IAM roles automatically — skip to Step 2 after this.
-
-#### Option B — AWS Console (manual)
-
-**1. Add the GitHub OIDC provider** (skip if it already exists in your account)
-
-IAM → Identity providers → Add provider:
-- Provider type: `OpenID Connect`
-- Provider URL: `https://token.actions.githubusercontent.com`
-- Audience: `sts.amazonaws.com`
-
-**2. Create the Plan policy**
-
-IAM → Policies → Create policy → JSON tab, paste the following (replace placeholder values with your actual bucket/table/KMS key):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "StateRead",
-      "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:ListBucket", "s3:GetBucketVersioning", "s3:GetEncryptionConfiguration"],
-      "Resource": [
-        "arn:aws:s3:::<your-state-bucket>",
-        "arn:aws:s3:::<your-state-bucket>/*"
-      ]
-    },
-    {
-      "Sid": "LockRW",
-      "Effect": "Allow",
-      "Action": ["dynamodb:DescribeTable", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"],
-      "Resource": "arn:aws:dynamodb:<region>:<account_id>:table/<your-lock-table>"
-    },
-    {
-      "Sid": "KMSRead",
-      "Effect": "Allow",
-      "Action": ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"],
-      "Resource": "arn:aws:kms:<region>:<account_id>:key/<your-kms-key-id>"
-    },
-    {
-      "Sid": "ReadOnly",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:Describe*",
-        "eks:Describe*",
-        "eks:List*",
-        "iam:Get*",
-        "iam:List*",
-        "kms:Describe*",
-        "kms:List*"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-Name the policy: `infra102-sandbox-ci-plan-policy`
-
-**3. Create the Plan role**
-
-IAM → Roles → Create role → Custom trust policy:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {
-      "Federated": "arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com"
-    },
-    "Action": "sts:AssumeRoleWithWebIdentity",
-    "Condition": {
-      "StringLike": {
-        "token.actions.githubusercontent.com:sub": "repo:Vuong-Bach/infra-102:*"
-      },
-      "StringEquals": {
-        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-      }
-    }
-  }]
-}
-```
-
-Add permissions: search and attach `infra102-sandbox-ci-plan-policy`.
-
-Name the role: `infra102-sandbox-ci-plan`
-
-**4. Create the Apply role** (main branch only)
-
-IAM → Roles → Create role → Custom trust policy:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {
-      "Federated": "arn:aws:iam::<account_id>:oidc-provider/token.actions.githubusercontent.com"
-    },
-    "Action": "sts:AssumeRoleWithWebIdentity",
-    "Condition": {
-      "StringEquals": {
-        "token.actions.githubusercontent.com:sub": "repo:Vuong-Bach/infra-102:ref:refs/heads/main",
-        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-      }
-    }
-  }]
-}
-```
-
-Add permissions: search and attach `AdministratorAccess`.
-
-> Note: `AdministratorAccess` is acceptable for a sandbox environment. Scope this down before using in staging/production.
-
-Name the role: `infra102-sandbox-ci-apply`
-
-**5. Copy the role ARNs** from each role's summary page — you will need them in Step 2.
-
----
-
-### Step 1 — Bootstrap (run once locally)
-
-Bootstrap creates the S3 state bucket, DynamoDB lock table, GitHub OIDC provider, and two IAM roles (plan / apply).
+Bootstrap creates the S3 state bucket, DynamoDB lock table, KMS key, GitHub OIDC provider, and two IAM roles (plan / apply).
 
 ```bash
 cd bootstrap
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars: set github_repo = "Vuong-Bach/infra-102" and your region
+# Edit terraform.tfvars: set your aws_region and github_repo
 terraform init
 terraform apply
 ```
 
-Note the outputs — you will need them in the next step:
+Outputs:
 
 ```
-state_bucket      = "infra102-sandbox-tfstate-<account_id>"
-state_lock_table  = "infra102-sandbox-tfstate-lock"
-plan_role_arn     = "arn:aws:iam::<account>:role/infra102-sandbox-ci-plan"
-apply_role_arn    = "arn:aws:iam::<account>:role/infra102-sandbox-ci-apply"
+aws_region       = "ap-southeast-1"
+state_bucket     = "infra102-sandbox-tfstate-<account_id>"
+state_lock_table = "infra102-sandbox-tfstate-lock"
+plan_role_arn    = "arn:aws:iam::<account_id>:role/infra102-sandbox-ci-plan"
+apply_role_arn   = "arn:aws:iam::<account_id>:role/infra102-sandbox-ci-apply"
 ```
 
-### Step 2 — Configure GitHub repository variables
+### Step 2 — Configure GitHub secrets
 
-Go to **GitHub → Settings → Secrets and variables → Actions → Variables** and add:
-
-| Variable | Value (from bootstrap output) |
-|---|---|
-| `AWS_REGION` | `us-east-1` |
-| `TF_STATE_BUCKET` | `infra102-sandbox-tfstate-<account_id>` |
-| `TF_STATE_LOCK_TABLE` | `infra102-sandbox-tfstate-lock` |
-| `TF_PLAN_ROLE_ARN` | ARN of the plan role |
-| `TF_APPLY_ROLE_ARN` | ARN of the apply role |
-
-> These are **Variables** (not Secrets) — they are not sensitive and are visible in workflow logs.
-
-### Step 3 — Push to main → CI/CD runs automatically
+Run the script to set all secrets from bootstrap outputs automatically:
 
 ```bash
-git add .
-git commit -m "first commit"
-git branch -M main
-git remote add origin https://github.com/Vuong-Bach/infra-102.git
-git push -u origin main
+./scripts/set-github-secrets.sh
 ```
 
-The `tf-apply.yml` workflow will trigger and apply both layers in order.
+This sets the following secrets in the repo:
+
+| Secret | Source |
+|---|---|
+| `AWS_REGION` | `var.aws_region` in bootstrap |
+| `TF_STATE_BUCKET` | bootstrap output |
+| `TF_STATE_LOCK_TABLE` | bootstrap output |
+| `TF_PLAN_ROLE_ARN` | bootstrap output |
+| `TF_APPLY_ROLE_ARN` | bootstrap output |
+
+### Step 3 — Create GitHub environment
+
+Go to **GitHub → repo Settings → Environments → New environment**, create one named `sandbox`.
+
+> Apply jobs run under this environment. The OIDC `sub` claim for apply jobs is `repo:<owner>/<repo>:environment:sandbox` — this is what the apply role trust policy expects.
+
+### Step 4 — Push to main → CI/CD runs automatically
+
+```bash
+git push origin main
+```
+
+The `tf-apply.yml` workflow triggers and applies both layers in order.
 
 ---
 
@@ -230,7 +116,7 @@ cd environments/sandbox/1-networking
 terraform init \
   -backend-config="bucket=<TF_STATE_BUCKET>" \
   -backend-config="key=sandbox/1-networking/terraform.tfstate" \
-  -backend-config="region=us-east-1" \
+  -backend-config="region=ap-southeast-1" \
   -backend-config="dynamodb_table=<TF_STATE_LOCK_TABLE>"
 
 terraform plan
@@ -244,21 +130,18 @@ cd environments/sandbox/2-cluster
 terraform init \
   -backend-config="bucket=<TF_STATE_BUCKET>" \
   -backend-config="key=sandbox/2-cluster/terraform.tfstate" \
-  -backend-config="region=us-east-1" \
+  -backend-config="region=ap-southeast-1" \
   -backend-config="dynamodb_table=<TF_STATE_LOCK_TABLE>"
 
-terraform plan \
-  -var="tf_state_bucket=<TF_STATE_BUCKET>"
-
-terraform apply \
-  -var="tf_state_bucket=<TF_STATE_BUCKET>"
+terraform plan -var="tf_state_bucket=<TF_STATE_BUCKET>"
+terraform apply -var="tf_state_bucket=<TF_STATE_BUCKET>"
 ```
 
 ### Connect kubectl after Layer 2 applies
 
 ```bash
 aws eks update-kubeconfig \
-  --region us-east-1 \
+  --region ap-southeast-1 \
   --name infra102-sandbox-cluster
 
 kubectl get nodes
@@ -274,7 +157,7 @@ Run these checks locally before pushing a change:
 make check
 ```
 
-This runs only Terraform formatting and validation for the sandbox environments.
+---
 
 ## CI/CD flow
 
@@ -282,18 +165,25 @@ This runs only Terraform formatting and validation for the sandbox environments.
 Pull Request opened
   └── tf-plan.yml
         ├── Plan · 1-networking  (fmt check + validate + plan)
-        └── Plan · 2-cluster     (fmt check + validate + plan)
+        └── Plan · 2-cluster     (fmt check + validate + plan, requires layer 1 state)
 
-Merged to main
+Merged to main / workflow_dispatch
   └── tf-apply.yml
         ├── Apply · 1-networking
         └── Apply · 2-cluster    (runs after 1-networking succeeds)
+
+Manual only
+  └── tf-destroy.yml
+        ├── Destroy · 2-cluster  (requires confirm = "destroy")
+        └── Destroy · 1-networking
 ```
 
 Authentication uses GitHub Actions OIDC — no AWS access keys are stored anywhere.
 
-- **Plan role** — any branch/PR can assume it (read-only)
-- **Apply role** — only `refs/heads/main` can assume it
+- **Plan role** — any branch/PR can assume it (`sub: repo:*`)
+- **Apply role** — only jobs running in the `sandbox` environment can assume it (`sub: repo:*:environment:sandbox`)
+
+> Note: `Plan · 2-cluster` will fail if layer 1 has never been applied (no remote state exists yet). Apply layer 1 first.
 
 ---
 

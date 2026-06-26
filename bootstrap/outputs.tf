@@ -1,3 +1,8 @@
+output "aws_region" {
+  description = "AWS region — set as AWS_REGION in GitHub secrets"
+  value       = var.aws_region
+}
+
 output "state_bucket" {
   description = "S3 bucket name for Terraform state — set as TF_STATE_BUCKET in GitHub vars"
   value       = aws_s3_bucket.state.id
