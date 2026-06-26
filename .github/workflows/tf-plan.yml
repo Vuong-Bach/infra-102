@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      aws_region:
+        description: 'AWS region'
+        required: false
+        default: 'us-east-1'
 
 permissions:
   id-token: write   # required for OIDC token
@@ -23,10 +28,10 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ secrets.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || inputs.aws_region }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -38,10 +43,10 @@ jobs:
         working-directory: environments/sandbox/1-networking
         run: |
           terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=sandbox/1-networking/terraform.tfstate" \
-            -backend-config="region=${{ vars.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ vars.TF_STATE_LOCK_TABLE }}"
+            -backend-config="region=${{ secrets.AWS_REGION || inputs.aws_region }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
 
       - name: validate
         working-directory: environments/sandbox/1-networking
@@ -51,7 +56,7 @@ jobs:
         working-directory: environments/sandbox/1-networking
         run: terraform plan -no-color
         env:
-          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION || inputs.aws_region }}
 
   # ── Layer 2: EKS cluster ────────────────────────────────────────────────────
   plan-cluster:
@@ -63,10 +68,10 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ secrets.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || inputs.aws_region }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -78,10 +83,10 @@ jobs:
         working-directory: environments/sandbox/2-cluster
         run: |
           terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=sandbox/2-cluster/terraform.tfstate" \
-            -backend-config="region=${{ vars.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ vars.TF_STATE_LOCK_TABLE }}"
+            -backend-config="region=${{ secrets.AWS_REGION || inputs.aws_region }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
 
       - name: validate
         working-directory: environments/sandbox/2-cluster
@@ -91,6 +96,6 @@ jobs:
         working-directory: environments/sandbox/2-cluster
         run: terraform plan -no-color
         env:
-          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-          TF_VAR_tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
-          TF_VAR_tf_state_region: ${{ vars.AWS_REGION }}
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION || inputs.aws_region }}
+          TF_VAR_tf_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
+          TF_VAR_tf_state_region: ${{ secrets.AWS_REGION || inputs.aws_region }}
